@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "SmartFilter – Auto Refresh & Row Filter",
+  "version": "1.0",
+  "description": "Automatically refresh any page and show/hide rows by keyword. Works on any site.",
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["panel.css"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png"
+  }
+}

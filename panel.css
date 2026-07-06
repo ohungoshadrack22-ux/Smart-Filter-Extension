@@ -1,0 +1,251 @@
+/* panel.css — styles for the SmartFilter floating panel */
+
+#__sf_panel {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483647;
+  width: 240px;
+  background: #0f172a;
+  color: #f1f5f9;
+  border-radius: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 13px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border: 1px solid #1e293b;
+  user-select: none;
+}
+
+#__sf_header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  cursor: grab;
+  border-bottom: 1px solid #1e293b;
+  border-radius: 12px 12px 0 0;
+}
+
+#__sf_header:active { cursor: grabbing; }
+
+#__sf_title {
+  font-weight: 600;
+  font-size: 13px;
+  color: #38bdf8;
+}
+
+#__sf_minimize {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 18px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 2px;
+}
+#__sf_minimize:hover { color: #f1f5f9; }
+
+#__sf_body { padding: 12px 14px; }
+
+.sf-section { margin-bottom: 4px; }
+
+.sf-divider {
+  height: 1px;
+  background: #1e293b;
+  margin: 10px 0;
+}
+
+.sf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sf-label {
+  font-size: 13px;
+  color: #cbd5e1;
+  font-weight: 500;
+}
+
+.sf-field-label {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 4px;
+  display: block;
+}
+
+#__sf_filter_fields textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-size: 12px;
+  padding: 6px 8px;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+}
+#__sf_filter_fields textarea:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
+#__sf_apply, #__sf_refresh_toggle {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px 0;
+  background: #1e40af;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+#__sf_apply:hover { background: #1d4ed8; }
+#__sf_refresh_toggle { background: #065f46; }
+#__sf_refresh_toggle:hover { background: #047857; }
+
+.sf-count {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+  min-height: 16px;
+}
+
+.sf-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #1e293b;
+  color: #64748b;
+  font-weight: 500;
+}
+
+#__sf_interval {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-size: 12px;
+  padding: 4px 6px;
+  font-family: inherit;
+}
+#__sf_interval:focus { outline: none; border-color: #38bdf8; }
+
+/* Toggle switch */
+.sf-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.sf-toggle input { opacity: 0; width: 0; height: 0; }
+.sf-slider {
+  position: absolute;
+  inset: 0;
+  background: #334155;
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.sf-slider::before {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+}
+.sf-toggle input:checked + .sf-slider { background: #38bdf8; }
+.sf-toggle input:checked + .sf-slider::before { transform: translateX(16px); }
+
+/* Refresh mode selector */
+.sf-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.sf-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid #1e293b;
+  transition: background 0.15s;
+}
+.sf-mode-btn:hover { background: #1e293b; }
+.sf-mode-btn input[type="radio"] { accent-color: #38bdf8; margin: 0; }
+.sf-mode-btn span { font-size: 12px; color: #cbd5e1; }
+.sf-mode-btn input:checked ~ span { color: #38bdf8; font-weight: 500; }
+
+.sf-mode-hint {
+  font-size: 11px;
+  color: #475569;
+  line-height: 1.4;
+  min-height: 28px;
+  margin-bottom: 4px;
+  font-style: italic;
+}
+
+/* Secondary button (Refresh now) */
+.sf-secondary-btn {
+  margin-top: 6px;
+  width: 100%;
+  padding: 6px 0;
+  background: transparent;
+  color: #64748b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.sf-secondary-btn:hover {
+  background: #1e293b;
+  color: #f1f5f9;
+}
+
+/* Countdown timer */
+#__sf_countdown {
+  margin-top: 8px;
+}
+
+.sf-countdown-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: #1e293b;
+  border-radius: 99px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.sf-countdown-bar {
+  height: 100%;
+  background: #38bdf8;
+  border-radius: 99px;
+  transition: width 0.9s linear;
+}
+
+.sf-countdown-text {
+  font-size: 11px;
+  color: #64748b;
+  text-align: center;
+}
+
+.sf-countdown-text strong {
+  color: #38bdf8;
+  font-weight: 600;
+}
