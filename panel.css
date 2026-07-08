@@ -249,3 +249,68 @@
   color: #38bdf8;
   font-weight: 600;
 }
+
+/* Preset interval buttons */
+.sf-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.sf-preset-btn {
+  padding: 5px 0;
+  background: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  text-align: center;
+}
+.sf-preset-btn:hover {
+  background: #334155;
+  color: #f1f5f9;
+}
+.sf-preset-btn.sf-preset-active {
+  background: #0c4a6e;
+  color: #38bdf8;
+  border-color: #38bdf8;
+}
+
+/* Custom trigger button */
+.sf-custom-trigger {
+  width: 100%;
+  margin-top: 5px;
+  padding: 5px 0;
+}
+
+/* Custom input row */
+#__sf_custom_row input[type="number"] {
+  flex: 1;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #f1f5f9;
+  font-size: 12px;
+  padding: 5px 8px;
+  font-family: inherit;
+}
+#__sf_custom_row input[type="number"]:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
+.sf-set-btn {
+  padding: 5px 12px;
+  background: #1e40af;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.sf-set-btn:hover { background: #1d4ed8; }

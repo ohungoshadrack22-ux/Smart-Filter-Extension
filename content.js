@@ -1,28 +1,32 @@
-// content.js — SmartFilter v1.3 (countdown + notifications)
+// content.js — SmartFilter v1.4 (preset interval buttons)
 
 const STORAGE_KEY = `sf_config_${location.hostname}`;
+const PRESETS = [
+  { label: "5s",  secs: 5 },
+  { label: "10s", secs: 10 },
+  { label: "30s", secs: 30 },
+  { label: "1m",  secs: 60 },
+  { label: "5m",  secs: 300 },
+  { label: "15m", secs: 900 },
+];
+
 let config = {
   enabled: false,
   showKeywords: [],
   hideKeywords: [],
   refreshEnabled: false,
   refreshInterval: 30,
-  refreshMode: "always",      // "always" | "interaction" | "manual"
-  notifyEnabled: false        // desktop notifications on new match
+  refreshMode: "always",
+  notifyEnabled: false
 };
 
 let observer = null;
 let _tabId = null;
-
-// Countdown
 let countdownTimer = null;
 let countdownSeconds = 0;
-
-// Notification: track which row texts were visible before refresh
-// so we can detect genuinely new matches after reload
 let knownMatchKeys = new Set();
 
-// ── Storage ──────────────────────────────────────────────────────────────────
+// ── Storage ───────────────────────────────────────────────────────────────────
 
 function saveConfig() {
   chrome.storage.local.set({ [STORAGE_KEY]: config });
@@ -37,14 +41,13 @@ function loadConfig(cb) {
 
 function getTabId() { return _tabId; }
 
-// ── Filtering ────────────────────────────────────────────────────────────────
+// ── Filtering ─────────────────────────────────────────────────────────────────
 
 function getRows() {
   return document.querySelectorAll("table tr, tbody tr, [role='row']");
 }
 
 function getMatchKey(row) {
-  // A short fingerprint of the row — enough to identify it uniquely
   return row.textContent.trim().slice(0, 120);
 }
 
@@ -66,15 +69,12 @@ function applyFilters({ checkNew = false } = {}) {
     const blocked = hide.length > 0 && hide.some(k => text.includes(k));
     const allowed = show.length === 0 || show.some(k => text.includes(k));
     const visible = !blocked && allowed;
-
     row.style.display = visible ? "" : "none";
 
     if (visible) {
       shown++;
       const key = getMatchKey(row);
-      if (checkNew && !knownMatchKeys.has(key)) {
-        newMatches.push(key);
-      }
+      if (checkNew && !knownMatchKeys.has(key)) newMatches.push(key);
       knownMatchKeys.add(key);
     } else {
       hidden++;
@@ -82,8 +82,6 @@ function applyFilters({ checkNew = false } = {}) {
   });
 
   updateCount(shown, hidden);
-
-  // Fire notification if new matches appeared
   if (checkNew && newMatches.length > 0 && config.notifyEnabled) {
     sendNotification(newMatches.length, shown);
   }
@@ -108,38 +106,28 @@ function startObserver() {
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
-// ── Countdown timer ───────────────────────────────────────────────────────────
+// ── Countdown ─────────────────────────────────────────────────────────────────
 
 function startCountdown(seconds) {
   stopCountdown();
   countdownSeconds = seconds;
   updateCountdownDisplay(countdownSeconds);
-
   countdownTimer = setInterval(() => {
     countdownSeconds--;
-    if (countdownSeconds <= 0) {
-      countdownSeconds = config.refreshInterval; // reset for next cycle
-    }
+    if (countdownSeconds <= 0) countdownSeconds = config.refreshInterval;
     updateCountdownDisplay(countdownSeconds);
   }, 1000);
 }
 
 function stopCountdown() {
-  if (countdownTimer) {
-    clearInterval(countdownTimer);
-    countdownTimer = null;
-  }
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
   updateCountdownDisplay(null);
 }
 
 function updateCountdownDisplay(secs) {
   const el = document.getElementById("__sf_countdown");
   if (!el) return;
-  if (secs === null) {
-    el.textContent = "";
-    el.style.display = "none";
-    return;
-  }
+  if (secs === null) { el.style.display = "none"; return; }
   el.style.display = "block";
   const pct = Math.round((secs / config.refreshInterval) * 100);
   el.innerHTML = `
@@ -150,16 +138,14 @@ function updateCountdownDisplay(secs) {
   `;
 }
 
-// ── Refresh pause-on-interaction ─────────────────────────────────────────────
+// ── Refresh pause-on-interaction ──────────────────────────────────────────────
 
 let userIsActive = false;
 let activityTimer = null;
 const IDLE_GRACE = 5000;
 
 function onUserActivity() {
-  // Ignore clicks inside our own panel
   if (event && event.target && document.getElementById("__sf_panel")?.contains(event.target)) return;
-
   if (!userIsActive) {
     userIsActive = true;
     if (config.refreshMode === "interaction" && config.refreshEnabled) {
@@ -172,11 +158,7 @@ function onUserActivity() {
   activityTimer = setTimeout(() => {
     userIsActive = false;
     if (config.refreshMode === "interaction" && config.refreshEnabled) {
-      chrome.runtime.sendMessage({
-        type: "START_REFRESH",
-        tabId: getTabId(),
-        intervalSeconds: config.refreshInterval
-      });
+      chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
       showPausedIndicator(false);
       startCountdown(config.refreshInterval);
     }
@@ -201,18 +183,13 @@ function showPausedIndicator(paused) {
   }
 }
 
-// ── Panel UI ─────────────────────────────────────────────────────────────────
+// ── Panel helpers ─────────────────────────────────────────────────────────────
 
 function updateCount(shown, hidden) {
   const el = document.getElementById("__sf_count");
   if (!el) return;
-  if (shown === null) {
-    el.textContent = "Filter off";
-    el.style.color = "#64748b";
-  } else {
-    el.textContent = `${shown} shown · ${hidden} hidden`;
-    el.style.color = "#fbbf24";
-  }
+  if (shown === null) { el.textContent = "Filter off"; el.style.color = "#64748b"; }
+  else { el.textContent = `${shown} shown · ${hidden} hidden`; el.style.color = "#fbbf24"; }
 }
 
 function updateRefreshBadge(active) {
@@ -220,7 +197,8 @@ function updateRefreshBadge(active) {
   const btn   = document.getElementById("__sf_refresh_toggle");
   if (!badge || !btn) return;
   if (active) {
-    badge.textContent = `Every ${config.refreshInterval}s`;
+    const label = formatInterval(config.refreshInterval);
+    badge.textContent = `Every ${label}`;
     badge.style.background = "#166534";
     badge.style.color = "#bbf7d0";
     btn.textContent = "Stop refresh";
@@ -232,8 +210,44 @@ function updateRefreshBadge(active) {
   }
 }
 
+function formatInterval(secs) {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${secs / 60}m`;
+  return `${secs / 3600}h`;
+}
+
+// Highlight the active preset button (or none if custom)
+function syncPresetButtons() {
+  document.querySelectorAll(".sf-preset-btn").forEach(btn => {
+    const active = parseInt(btn.dataset.secs) === config.refreshInterval;
+    btn.classList.toggle("sf-preset-active", active);
+  });
+  // Show/hide the custom input row
+  const isPreset = PRESETS.some(p => p.secs === config.refreshInterval);
+  const customRow = document.getElementById("__sf_custom_row");
+  if (customRow) customRow.style.display = isPreset ? "none" : "flex";
+}
+
+function setInterval_(secs) {
+  config.refreshInterval = secs;
+  saveConfig();
+  syncPresetButtons();
+  updateRefreshBadge(config.refreshEnabled);
+  // If refresh is already running, restart it with the new interval
+  if (config.refreshEnabled && config.refreshMode !== "manual") {
+    chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: secs });
+    startCountdown(secs);
+  }
+}
+
+// ── Build panel ───────────────────────────────────────────────────────────────
+
 function buildPanel() {
   if (document.getElementById("__sf_panel")) return;
+
+  const presetHTML = PRESETS.map(p =>
+    `<button class="sf-preset-btn" data-secs="${p.secs}">${p.label}</button>`
+  ).join("");
 
   const panel = document.createElement("div");
   panel.id = "__sf_panel";
@@ -272,10 +286,15 @@ function buildPanel() {
           <span id="__sf_refresh_badge" class="sf-badge">Off</span>
         </div>
 
-        <div class="sf-row" style="margin-top:8px">
-          <span class="sf-field-label" style="margin:0">Every</span>
-          <input type="number" id="__sf_interval" min="5" max="3600" value="30" style="width:56px;margin:0 6px">
-          <span class="sf-field-label" style="margin:0">seconds</span>
+        <div class="sf-field-label" style="margin-top:10px">Interval</div>
+        <div class="sf-preset-grid">${presetHTML}</div>
+
+        <button class="sf-preset-btn sf-custom-trigger" id="__sf_custom_trigger">+ Custom</button>
+
+        <div id="__sf_custom_row" style="display:none;align-items:center;gap:6px;margin-top:6px">
+          <input type="number" id="__sf_interval" min="5" max="86400" placeholder="secs">
+          <span class="sf-field-label" style="margin:0">s</span>
+          <button id="__sf_custom_set" class="sf-set-btn">Set</button>
         </div>
 
         <div class="sf-field-label" style="margin-top:10px">Refresh mode</div>
@@ -298,7 +317,6 @@ function buildPanel() {
         <button id="__sf_refresh_toggle">Start refresh</button>
         <button id="__sf_refresh_now" class="sf-secondary-btn">Refresh now</button>
 
-        <!-- Countdown lives here, shown only when refresh is active -->
         <div id="__sf_countdown" style="display:none;margin-top:8px"></div>
       </div>
 
@@ -312,7 +330,7 @@ function buildPanel() {
             <span class="sf-slider"></span>
           </label>
         </div>
-        <div class="sf-field-label" style="margin-top:4px">Alert when new matching rows appear after a refresh.</div>
+        <div class="sf-field-label" style="margin-top:4px">Alert when new matching rows appear.</div>
       </div>
 
     </div>
@@ -321,26 +339,25 @@ function buildPanel() {
   document.body.appendChild(panel);
   makeDraggable(panel);
 
-  // Restore saved values
-  document.getElementById("__sf_filter_on").checked  = config.enabled;
-  document.getElementById("__sf_show").value          = config.showKeywords.join(", ");
-  document.getElementById("__sf_hide").value          = config.hideKeywords.join(", ");
-  document.getElementById("__sf_interval").value      = config.refreshInterval;
-  document.getElementById("__sf_notify_on").checked   = config.notifyEnabled;
+  // Restore values
+  document.getElementById("__sf_filter_on").checked = config.enabled;
+  document.getElementById("__sf_show").value         = config.showKeywords.join(", ");
+  document.getElementById("__sf_hide").value         = config.hideKeywords.join(", ");
+  document.getElementById("__sf_notify_on").checked  = config.notifyEnabled;
   toggleFilterFields(config.enabled);
 
   const savedMode = document.querySelector(`input[name="sf_mode"][value="${config.refreshMode}"]`);
   if (savedMode) savedMode.checked = true;
   updateModeHint(config.refreshMode);
+  syncPresetButtons();
 
-  // Check alarm state and start countdown if active
   chrome.runtime.sendMessage({ type: "GET_ALARM", tabId: getTabId() }, (res) => {
     const active = res && res.active;
     updateRefreshBadge(active);
     if (active) startCountdown(config.refreshInterval);
   });
 
-  // ── Listeners ──────────────────────────────────────────────────────────────
+  // ── Listeners ────────────────────────────────────────────────────────────────
 
   document.getElementById("__sf_filter_on").addEventListener("change", (e) => {
     config.enabled = e.target.checked;
@@ -350,11 +367,37 @@ function buildPanel() {
   });
 
   document.getElementById("__sf_apply").addEventListener("click", () => {
-    config.showKeywords  = parseKeywords(document.getElementById("__sf_show").value);
-    config.hideKeywords  = parseKeywords(document.getElementById("__sf_hide").value);
-    config.refreshInterval = parseInt(document.getElementById("__sf_interval").value) || 30;
+    config.showKeywords = parseKeywords(document.getElementById("__sf_show").value);
+    config.hideKeywords = parseKeywords(document.getElementById("__sf_hide").value);
     saveConfig();
     applyFilters();
+  });
+
+  // Preset buttons
+  document.querySelectorAll(".sf-preset-btn[data-secs]").forEach(btn => {
+    btn.addEventListener("click", () => setInterval_(parseInt(btn.dataset.secs)));
+  });
+
+  // Custom trigger — show input row
+  document.getElementById("__sf_custom_trigger").addEventListener("click", () => {
+    const row = document.getElementById("__sf_custom_row");
+    row.style.display = row.style.display === "none" ? "flex" : "none";
+    if (row.style.display === "flex") document.getElementById("__sf_interval").focus();
+    // Deselect all preset buttons to signal custom mode
+    document.querySelectorAll(".sf-preset-btn").forEach(b => b.classList.remove("sf-preset-active"));
+  });
+
+  // Custom set button
+  document.getElementById("__sf_custom_set").addEventListener("click", () => {
+    const secs = parseInt(document.getElementById("__sf_interval").value);
+    if (!secs || secs < 5) return;
+    setInterval_(secs);
+    document.getElementById("__sf_custom_row").style.display = "none";
+  });
+
+  // Also allow Enter in custom input
+  document.getElementById("__sf_interval").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("__sf_custom_set").click();
   });
 
   document.querySelectorAll("input[name='sf_mode']").forEach(radio => {
@@ -382,9 +425,8 @@ function buildPanel() {
           stopCountdown();
         });
       } else {
-        const secs = parseInt(document.getElementById("__sf_interval").value) || 30;
-        config.refreshInterval = secs;
-        config.refreshEnabled  = true;
+        const secs = config.refreshInterval;
+        config.refreshEnabled = true;
         saveConfig();
         if (config.refreshMode !== "manual") {
           chrome.runtime.sendMessage({ type: "START_REFRESH", tabId, intervalSeconds: secs }, () => {
@@ -398,9 +440,7 @@ function buildPanel() {
     });
   });
 
-  document.getElementById("__sf_refresh_now").addEventListener("click", () => {
-    location.reload();
-  });
+  document.getElementById("__sf_refresh_now").addEventListener("click", () => location.reload());
 
   document.getElementById("__sf_minimize").addEventListener("click", () => {
     const body = document.getElementById("__sf_body");
@@ -411,9 +451,7 @@ function buildPanel() {
 }
 
 function requestNotificationPermission() {
-  if (Notification.permission === "default") {
-    Notification.requestPermission();
-  }
+  if (Notification.permission === "default") Notification.requestPermission();
 }
 
 function updateModeHint(mode) {
@@ -441,18 +479,15 @@ function parseKeywords(str) {
 function makeDraggable(el) {
   const header = document.getElementById("__sf_header");
   let startX, startY, startLeft, startTop;
-
   header.addEventListener("mousedown", (e) => {
     if (e.target.tagName === "BUTTON") return;
     startX = e.clientX; startY = e.clientY;
     const rect = el.getBoundingClientRect();
     startLeft = rect.left; startTop = rect.top;
-
     const move = (e) => {
-      el.style.left   = `${startLeft + e.clientX - startX}px`;
-      el.style.top    = `${startTop  + e.clientY - startY}px`;
-      el.style.right  = "auto";
-      el.style.bottom = "auto";
+      el.style.left = `${startLeft + e.clientX - startX}px`;
+      el.style.top  = `${startTop  + e.clientY - startY}px`;
+      el.style.right = "auto"; el.style.bottom = "auto";
     };
     const up = () => {
       document.removeEventListener("mousemove", move);
@@ -473,8 +508,7 @@ chrome.runtime.sendMessage({ type: "GET_TAB_ID" }, (res) => {
 loadConfig(() => {
   setTimeout(() => {
     buildPanel();
-    applyFilters({ checkNew: false }); // on first load don't notify — everything is "new"
-    // snapshot current matches so only genuinely new ones trigger alerts later
+    applyFilters({ checkNew: false });
     getRows().forEach(row => {
       if (!row.querySelector("th") && row.style.display !== "none") {
         knownMatchKeys.add(getMatchKey(row));
@@ -482,13 +516,8 @@ loadConfig(() => {
     });
     startObserver();
     attachActivityListeners();
-
     if (config.refreshEnabled && config.refreshMode !== "manual") {
-      chrome.runtime.sendMessage({
-        type: "START_REFRESH",
-        tabId: getTabId(),
-        intervalSeconds: config.refreshInterval
-      });
+      chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
       updateRefreshBadge(true);
       startCountdown(config.refreshInterval);
     }
