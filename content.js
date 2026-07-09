@@ -1,7 +1,7 @@
-// content.js — SmartFilter v1.5 (refresh count limit)
+// content.js — SmartFilter v1.6 (tabbed panel layout)
 
 const STORAGE_KEY = `sf_config_${location.hostname}`;
-const COUNT_KEY   = `sf_count_${location.hostname}`; // separate key — resets independently
+const COUNT_KEY   = `sf_count_${location.hostname}`;
 const PRESETS = [
   { label: "5s",  secs: 5 },
   { label: "10s", secs: 10 },
@@ -19,17 +19,17 @@ let config = {
   refreshInterval: 30,
   refreshMode: "always",
   notifyEnabled: false,
-  countLimitEnabled: false,   // whether count limit is on
-  countLimit: 10,             // max number of refreshes
+  countLimitEnabled: false,
+  countLimit: 10,
+  activeTab: "refresh"        // remembered tab
 };
 
-// runtime state
-let observer        = null;
-let _tabId          = null;
-let countdownTimer  = null;
-let countdownSecs   = 0;
-let knownMatchKeys  = new Set();
-let currentCount    = 0;  // how many refreshes have happened this session
+let observer       = null;
+let _tabId         = null;
+let countdownTimer = null;
+let countdownSecs  = 0;
+let knownMatchKeys = new Set();
+let currentCount   = 0;
 
 // ── Storage ───────────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ function getMatchKey(row) {
 function applyFilters({ checkNew = false } = {}) {
   if (!config.enabled) {
     getRows().forEach(r => r.style.display = "");
-    updateCount(null, null);
+    updateFilterStat(null, null);
     return;
   }
   const show = config.showKeywords.map(k => k.toLowerCase().trim()).filter(Boolean);
@@ -95,7 +95,8 @@ function applyFilters({ checkNew = false } = {}) {
     }
   });
 
-  updateCount(shown, hidden);
+  updateFilterStat(shown, hidden);
+  updateStatusBar();
   if (checkNew && newMatches.length > 0 && config.notifyEnabled) {
     sendNotification(newMatches.length, shown);
   }
@@ -104,8 +105,8 @@ function applyFilters({ checkNew = false } = {}) {
 function sendNotification(newCount, totalShown) {
   chrome.runtime.sendMessage({
     type: "NOTIFY",
-    title: "SmartFilter — New match found!",
-    message: `${newCount} new row${newCount > 1 ? "s" : ""} appeared (${totalShown} total visible) on ${location.hostname}`
+    title: "SmartFilter — New match!",
+    message: `${newCount} new row${newCount > 1 ? "s" : ""} on ${location.hostname} (${totalShown} visible)`
   });
 }
 
@@ -118,49 +119,35 @@ function startObserver() {
   observer.observe(document.body, { childList: true, subtree: true });
 }
 
-// ── Refresh count logic ───────────────────────────────────────────────────────
+// ── Refresh count ─────────────────────────────────────────────────────────────
 
-// Called on every page load when count limit is active
 function incrementAndCheckCount() {
   if (!config.countLimitEnabled || !config.refreshEnabled) return;
-
   currentCount++;
   saveCount();
   updateCountDisplay();
+  updateStatusBar();
 
   if (currentCount >= config.countLimit) {
-    // Limit reached — stop everything
     chrome.runtime.sendMessage({ type: "STOP_REFRESH", tabId: getTabId() });
     config.refreshEnabled = false;
     saveConfig();
     stopCountdown();
     updateRefreshBadge(false);
-
-    // Notify user
+    updateStatusBar();
     chrome.runtime.sendMessage({
       type: "NOTIFY",
-      title: "SmartFilter — Refresh limit reached",
-      message: `Stopped after ${currentCount} refresh${currentCount > 1 ? "es" : ""} on ${location.hostname}`
+      title: "SmartFilter — Limit reached",
+      message: `Stopped after ${currentCount} refreshes on ${location.hostname}`
     });
-
-    // Show stopped state in badge
-    const badge = document.getElementById("__sf_refresh_badge");
-    if (badge) {
-      badge.textContent = `Stopped at ${currentCount}`;
-      badge.style.background = "#451a03";
-      badge.style.color = "#fed7aa";
-    }
   }
 }
 
 function updateCountDisplay() {
   const el = document.getElementById("__sf_count_display");
   if (!el) return;
-  if (!config.countLimitEnabled) {
-    el.style.display = "none";
-    return;
-  }
-  el.style.display = "flex";
+  if (!config.countLimitEnabled) { el.style.display = "none"; return; }
+  el.style.display = "block";
   const remaining = Math.max(0, config.countLimit - currentCount);
   const pct = Math.min(100, Math.round((currentCount / config.countLimit) * 100));
   el.innerHTML = `
@@ -206,55 +193,51 @@ function updateCountdownDisplay(secs) {
   `;
 }
 
-// ── Refresh pause-on-interaction ──────────────────────────────────────────────
+// ── Status bar (always visible, shows state across all tabs) ──────────────────
 
-let userIsActive = false;
-let activityTimer = null;
-const IDLE_GRACE = 5000;
+function updateStatusBar() {
+  const bar = document.getElementById("__sf_statusbar");
+  if (!bar) return;
 
-function onUserActivity() {
-  if (event && event.target && document.getElementById("__sf_panel")?.contains(event.target)) return;
-  if (!userIsActive) {
-    userIsActive = true;
-    if (config.refreshMode === "interaction" && config.refreshEnabled) {
-      chrome.runtime.sendMessage({ type: "STOP_REFRESH", tabId: getTabId() });
-      showPausedIndicator(true);
-      stopCountdown();
-    }
+  const chips = [];
+
+  if (config.refreshEnabled) {
+    chips.push(`<span class="sf-chip sf-chip-green">↻ ${formatInterval(config.refreshInterval)}</span>`);
   }
-  clearTimeout(activityTimer);
-  activityTimer = setTimeout(() => {
-    userIsActive = false;
-    if (config.refreshMode === "interaction" && config.refreshEnabled) {
-      chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
-      showPausedIndicator(false);
-      startCountdown(config.refreshInterval);
-    }
-  }, IDLE_GRACE);
+  if (config.enabled) {
+    const shown = document.querySelectorAll("table tr:not([style*='display: none']):not([style*='display:none'])").length;
+    chips.push(`<span class="sf-chip sf-chip-yellow">⬡ ${shown} rows</span>`);
+  }
+  if (config.notifyEnabled) {
+    chips.push(`<span class="sf-chip sf-chip-blue">🔔</span>`);
+  }
+  if (config.countLimitEnabled) {
+    chips.push(`<span class="sf-chip sf-chip-amber">${currentCount}/${config.countLimit}</span>`);
+  }
+
+  bar.innerHTML = chips.length
+    ? chips.join("")
+    : `<span class="sf-chip sf-chip-muted">Idle</span>`;
 }
 
-function attachActivityListeners() {
-  ["mousedown", "keydown", "scroll", "touchstart"].forEach(evt =>
-    document.addEventListener(evt, onUserActivity, { passive: true })
-  );
-}
+// ── Tab switching ─────────────────────────────────────────────────────────────
 
-function showPausedIndicator(paused) {
-  const badge = document.getElementById("__sf_refresh_badge");
-  if (!badge) return;
-  if (paused) {
-    badge.textContent = "Paused";
-    badge.style.background = "#7c2d12";
-    badge.style.color = "#fed7aa";
-  } else {
-    updateRefreshBadge(true);
-  }
+function switchTab(tabName) {
+  config.activeTab = tabName;
+  saveConfig();
+
+  document.querySelectorAll(".sf-tab-btn").forEach(btn => {
+    btn.classList.toggle("sf-tab-active", btn.dataset.tab === tabName);
+  });
+  document.querySelectorAll(".sf-tab-pane").forEach(pane => {
+    pane.style.display = pane.dataset.pane === tabName ? "block" : "none";
+  });
 }
 
 // ── Panel helpers ─────────────────────────────────────────────────────────────
 
-function updateCount(shown, hidden) {
-  const el = document.getElementById("__sf_count");
+function updateFilterStat(shown, hidden) {
+  const el = document.getElementById("__sf_filter_stat");
   if (!el) return;
   if (shown === null) { el.textContent = "Filter off"; el.style.color = "#64748b"; }
   else { el.textContent = `${shown} shown · ${hidden} hidden`; el.style.color = "#fbbf24"; }
@@ -275,6 +258,7 @@ function updateRefreshBadge(active) {
     badge.style.color = "#64748b";
     btn.textContent = "Start refresh";
   }
+  updateStatusBar();
 }
 
 function formatInterval(secs) {
@@ -307,6 +291,7 @@ function toggleCountFields(enabled) {
   const fields = document.getElementById("__sf_count_fields");
   if (fields) fields.style.opacity = enabled ? "1" : "0.4";
   updateCountDisplay();
+  updateStatusBar();
 }
 
 // ── Build panel ───────────────────────────────────────────────────────────────
@@ -326,92 +311,107 @@ function buildPanel() {
       <button id="__sf_minimize" title="Minimize">−</button>
     </div>
 
-    <div id="__sf_body">
+    <!-- Status bar: always visible, summarises all active features -->
+    <div id="__sf_statusbar"></div>
 
-      <!-- Filter section -->
-      <div class="sf-section">
-        <div class="sf-row">
-          <span class="sf-label">Filter rows</span>
-          <label class="sf-toggle">
-            <input type="checkbox" id="__sf_filter_on">
-            <span class="sf-slider"></span>
-          </label>
-        </div>
-      </div>
-      <div class="sf-section" id="__sf_filter_fields">
-        <div class="sf-field-label">Show rows containing</div>
-        <textarea id="__sf_show" placeholder="captioning, translation, proofreading" rows="2"></textarea>
-        <div class="sf-field-label" style="margin-top:8px">Hide rows containing</div>
-        <textarea id="__sf_hide" placeholder="inaudible, test" rows="2"></textarea>
-        <button id="__sf_apply">Apply filters</button>
-        <div id="__sf_count" class="sf-count">Filter off</div>
-      </div>
+    <!-- Tab nav -->
+    <div id="__sf_tabnav">
+      <button class="sf-tab-btn" data-tab="refresh">Refresh</button>
+      <button class="sf-tab-btn" data-tab="filter">Filter</button>
+      <button class="sf-tab-btn" data-tab="alerts">Alerts</button>
+    </div>
 
-      <div class="sf-divider"></div>
+    <!-- Tab panes -->
+    <div id="__sf_tabcontent">
 
-      <!-- Refresh section -->
-      <div class="sf-section">
-        <div class="sf-row">
-          <span class="sf-label">Auto refresh</span>
-          <span id="__sf_refresh_badge" class="sf-badge">Off</span>
-        </div>
-
-        <div class="sf-field-label" style="margin-top:10px">Interval</div>
-        <div class="sf-preset-grid">${presetHTML}</div>
-        <button class="sf-preset-btn sf-custom-trigger" id="__sf_custom_trigger">+ Custom</button>
-        <div id="__sf_custom_row" style="display:none;align-items:center;gap:6px;margin-top:6px">
-          <input type="number" id="__sf_interval" min="5" max="86400" placeholder="secs">
-          <span class="sf-field-label" style="margin:0">s</span>
-          <button id="__sf_custom_set" class="sf-set-btn">Set</button>
-        </div>
-
-        <div class="sf-field-label" style="margin-top:10px">Refresh mode</div>
-        <div class="sf-mode-group">
-          <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="always"><span>Always</span></label>
-          <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="interaction"><span>Pause on use</span></label>
-          <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="manual"><span>Manual only</span></label>
-        </div>
-        <div id="__sf_mode_hint" class="sf-mode-hint"></div>
-
-        <button id="__sf_refresh_toggle">Start refresh</button>
-        <button id="__sf_refresh_now" class="sf-secondary-btn">Refresh now</button>
-        <div id="__sf_countdown" style="display:none;margin-top:8px"></div>
-      </div>
-
-      <div class="sf-divider"></div>
-
-      <!-- Refresh count limit section -->
-      <div class="sf-section">
-        <div class="sf-row">
-          <span class="sf-label">Refresh limit</span>
-          <label class="sf-toggle">
-            <input type="checkbox" id="__sf_count_limit_on">
-            <span class="sf-slider"></span>
-          </label>
-        </div>
-        <div id="__sf_count_fields">
-          <div class="sf-count-input-row">
-            <span class="sf-field-label" style="margin:0">Stop after</span>
-            <input type="number" id="__sf_count_limit_val" min="1" max="9999" value="10">
-            <span class="sf-field-label" style="margin:0">refreshes</span>
+      <!-- ── REFRESH TAB ── -->
+      <div class="sf-tab-pane" data-pane="refresh">
+        <div class="sf-section">
+          <div class="sf-row">
+            <span class="sf-label">Auto refresh</span>
+            <span id="__sf_refresh_badge" class="sf-badge">Off</span>
           </div>
-          <div id="__sf_count_display" style="display:none;margin-top:8px"></div>
-          <button id="__sf_count_reset" class="sf-secondary-btn" style="margin-top:6px">Reset counter</button>
+
+          <div class="sf-field-label" style="margin-top:10px">Interval</div>
+          <div class="sf-preset-grid">${presetHTML}</div>
+          <button class="sf-preset-btn sf-custom-trigger" id="__sf_custom_trigger">+ Custom</button>
+          <div id="__sf_custom_row" style="display:none;align-items:center;gap:6px;margin-top:6px">
+            <input type="number" id="__sf_interval" min="5" max="86400" placeholder="secs">
+            <span class="sf-field-label" style="margin:0">s</span>
+            <button id="__sf_custom_set" class="sf-set-btn">Set</button>
+          </div>
+
+          <div class="sf-field-label" style="margin-top:10px">Mode</div>
+          <div class="sf-mode-group">
+            <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="always"><span>Always</span></label>
+            <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="interaction"><span>Pause on use</span></label>
+            <label class="sf-mode-btn"><input type="radio" name="sf_mode" value="manual"><span>Manual only</span></label>
+          </div>
+          <div id="__sf_mode_hint" class="sf-mode-hint"></div>
+
+          <button id="__sf_refresh_toggle">Start refresh</button>
+          <button id="__sf_refresh_now" class="sf-secondary-btn">Refresh now</button>
+          <div id="__sf_countdown" style="display:none;margin-top:8px"></div>
+        </div>
+
+        <div class="sf-divider"></div>
+
+        <!-- Refresh limit (lives in Refresh tab) -->
+        <div class="sf-section">
+          <div class="sf-row">
+            <span class="sf-label">Refresh limit</span>
+            <label class="sf-toggle">
+              <input type="checkbox" id="__sf_count_limit_on">
+              <span class="sf-slider"></span>
+            </label>
+          </div>
+          <div id="__sf_count_fields">
+            <div class="sf-count-input-row">
+              <span class="sf-field-label" style="margin:0">Stop after</span>
+              <input type="number" id="__sf_count_limit_val" min="1" max="9999" value="10">
+              <span class="sf-field-label" style="margin:0">refreshes</span>
+            </div>
+            <div id="__sf_count_display" style="display:none;margin-top:8px"></div>
+            <button id="__sf_count_reset" class="sf-secondary-btn" style="margin-top:6px">Reset counter</button>
+          </div>
         </div>
       </div>
 
-      <div class="sf-divider"></div>
-
-      <!-- Notifications section -->
-      <div class="sf-section">
-        <div class="sf-row">
-          <span class="sf-label">Notifications</span>
-          <label class="sf-toggle">
-            <input type="checkbox" id="__sf_notify_on">
-            <span class="sf-slider"></span>
-          </label>
+      <!-- ── FILTER TAB ── -->
+      <div class="sf-tab-pane" data-pane="filter">
+        <div class="sf-section">
+          <div class="sf-row">
+            <span class="sf-label">Filter rows</span>
+            <label class="sf-toggle">
+              <input type="checkbox" id="__sf_filter_on">
+              <span class="sf-slider"></span>
+            </label>
+          </div>
         </div>
-        <div class="sf-field-label" style="margin-top:4px">Alert when new matching rows appear.</div>
+        <div class="sf-section" id="__sf_filter_fields">
+          <div class="sf-field-label">Show rows containing</div>
+          <textarea id="__sf_show" placeholder="captioning, translation, proofreading" rows="2"></textarea>
+          <div class="sf-field-label" style="margin-top:8px">Hide rows containing</div>
+          <textarea id="__sf_hide" placeholder="inaudible, test" rows="2"></textarea>
+          <button id="__sf_apply">Apply filters</button>
+          <div id="__sf_filter_stat" class="sf-count">Filter off</div>
+        </div>
+      </div>
+
+      <!-- ── ALERTS TAB ── -->
+      <div class="sf-tab-pane" data-pane="alerts">
+        <div class="sf-section">
+          <div class="sf-row">
+            <span class="sf-label">Notifications</span>
+            <label class="sf-toggle">
+              <input type="checkbox" id="__sf_notify_on">
+              <span class="sf-slider"></span>
+            </label>
+          </div>
+          <div class="sf-field-label" style="margin-top:6px">
+            Alert when new matching rows appear after a refresh.
+          </div>
+        </div>
       </div>
 
     </div>
@@ -421,12 +421,12 @@ function buildPanel() {
   makeDraggable(panel);
 
   // Restore values
-  document.getElementById("__sf_filter_on").checked       = config.enabled;
-  document.getElementById("__sf_show").value               = config.showKeywords.join(", ");
-  document.getElementById("__sf_hide").value               = config.hideKeywords.join(", ");
-  document.getElementById("__sf_notify_on").checked        = config.notifyEnabled;
-  document.getElementById("__sf_count_limit_on").checked   = config.countLimitEnabled;
-  document.getElementById("__sf_count_limit_val").value    = config.countLimit;
+  document.getElementById("__sf_filter_on").checked      = config.enabled;
+  document.getElementById("__sf_show").value              = config.showKeywords.join(", ");
+  document.getElementById("__sf_hide").value              = config.hideKeywords.join(", ");
+  document.getElementById("__sf_notify_on").checked       = config.notifyEnabled;
+  document.getElementById("__sf_count_limit_on").checked  = config.countLimitEnabled;
+  document.getElementById("__sf_count_limit_val").value   = config.countLimit;
   toggleFilterFields(config.enabled);
   toggleCountFields(config.countLimitEnabled);
 
@@ -436,27 +436,23 @@ function buildPanel() {
   syncPresetButtons();
   updateCountDisplay();
 
+  // Switch to saved tab
+  switchTab(config.activeTab || "refresh");
+  updateStatusBar();
+
   chrome.runtime.sendMessage({ type: "GET_ALARM", tabId: getTabId() }, (res) => {
     const active = res && res.active;
     updateRefreshBadge(active);
     if (active) startCountdown(config.refreshInterval);
   });
 
-  // ── Listeners ────────────────────────────────────────────────────────────────
+  // ── Tab nav listeners ─────────────────────────────────────────────────────
 
-  document.getElementById("__sf_filter_on").addEventListener("change", (e) => {
-    config.enabled = e.target.checked;
-    toggleFilterFields(config.enabled);
-    saveConfig();
-    applyFilters();
+  document.querySelectorAll(".sf-tab-btn").forEach(btn => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
 
-  document.getElementById("__sf_apply").addEventListener("click", () => {
-    config.showKeywords = parseKeywords(document.getElementById("__sf_show").value);
-    config.hideKeywords = parseKeywords(document.getElementById("__sf_hide").value);
-    saveConfig();
-    applyFilters();
-  });
+  // ── Refresh tab listeners ─────────────────────────────────────────────────
 
   document.querySelectorAll(".sf-preset-btn[data-secs]").forEach(btn => {
     btn.addEventListener("click", () => setInterval_(parseInt(btn.dataset.secs)));
@@ -488,39 +484,6 @@ function buildPanel() {
     });
   });
 
-  document.getElementById("__sf_count_limit_on").addEventListener("change", (e) => {
-    config.countLimitEnabled = e.target.checked;
-    saveConfig();
-    toggleCountFields(config.countLimitEnabled);
-    if (!config.countLimitEnabled) resetCount();
-  });
-
-  document.getElementById("__sf_count_limit_val").addEventListener("change", (e) => {
-    config.countLimit = parseInt(e.target.value) || 10;
-    saveConfig();
-    updateCountDisplay();
-  });
-
-  document.getElementById("__sf_count_reset").addEventListener("click", () => {
-    resetCount();
-    // If refresh was stopped by limit, restart it
-    if (!config.refreshEnabled && config.countLimitEnabled) {
-      config.refreshEnabled = true;
-      saveConfig();
-      if (config.refreshMode !== "manual") {
-        chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
-        updateRefreshBadge(true);
-        startCountdown(config.refreshInterval);
-      }
-    }
-  });
-
-  document.getElementById("__sf_notify_on").addEventListener("change", (e) => {
-    config.notifyEnabled = e.target.checked;
-    saveConfig();
-    if (config.notifyEnabled) requestNotificationPermission();
-  });
-
   document.getElementById("__sf_refresh_toggle").addEventListener("click", () => {
     const tabId = getTabId();
     chrome.runtime.sendMessage({ type: "GET_ALARM", tabId }, (res) => {
@@ -548,10 +511,66 @@ function buildPanel() {
 
   document.getElementById("__sf_refresh_now").addEventListener("click", () => location.reload());
 
+  document.getElementById("__sf_count_limit_on").addEventListener("change", (e) => {
+    config.countLimitEnabled = e.target.checked;
+    saveConfig();
+    toggleCountFields(config.countLimitEnabled);
+    if (!config.countLimitEnabled) resetCount();
+  });
+
+  document.getElementById("__sf_count_limit_val").addEventListener("change", (e) => {
+    config.countLimit = parseInt(e.target.value) || 10;
+    saveConfig();
+    updateCountDisplay();
+  });
+
+  document.getElementById("__sf_count_reset").addEventListener("click", () => {
+    resetCount();
+    if (!config.refreshEnabled && config.countLimitEnabled) {
+      config.refreshEnabled = true;
+      saveConfig();
+      if (config.refreshMode !== "manual") {
+        chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
+        updateRefreshBadge(true);
+        startCountdown(config.refreshInterval);
+      }
+    }
+  });
+
+  // ── Filter tab listeners ──────────────────────────────────────────────────
+
+  document.getElementById("__sf_filter_on").addEventListener("change", (e) => {
+    config.enabled = e.target.checked;
+    toggleFilterFields(config.enabled);
+    saveConfig();
+    applyFilters();
+    updateStatusBar();
+  });
+
+  document.getElementById("__sf_apply").addEventListener("click", () => {
+    config.showKeywords = parseKeywords(document.getElementById("__sf_show").value);
+    config.hideKeywords = parseKeywords(document.getElementById("__sf_hide").value);
+    saveConfig();
+    applyFilters();
+  });
+
+  // ── Alerts tab listeners ──────────────────────────────────────────────────
+
+  document.getElementById("__sf_notify_on").addEventListener("change", (e) => {
+    config.notifyEnabled = e.target.checked;
+    saveConfig();
+    updateStatusBar();
+    if (config.notifyEnabled) requestNotificationPermission();
+  });
+
+  // ── Minimize ──────────────────────────────────────────────────────────────
+
   document.getElementById("__sf_minimize").addEventListener("click", () => {
-    const body = document.getElementById("__sf_body");
-    const minimized = body.style.display === "none";
-    body.style.display = minimized ? "" : "none";
+    const content = document.getElementById("__sf_tabcontent");
+    const tabnav  = document.getElementById("__sf_tabnav");
+    const minimized = content.style.display === "none";
+    content.style.display  = minimized ? "" : "none";
+    tabnav.style.display   = minimized ? "" : "none";
     document.getElementById("__sf_minimize").textContent = minimized ? "−" : "+";
   });
 }
@@ -605,6 +624,51 @@ function makeDraggable(el) {
   });
 }
 
+// ── Pause on interaction ──────────────────────────────────────────────────────
+
+let userIsActive = false;
+let activityTimer = null;
+const IDLE_GRACE = 5000;
+
+function onUserActivity() {
+  if (event && event.target && document.getElementById("__sf_panel")?.contains(event.target)) return;
+  if (!userIsActive) {
+    userIsActive = true;
+    if (config.refreshMode === "interaction" && config.refreshEnabled) {
+      chrome.runtime.sendMessage({ type: "STOP_REFRESH", tabId: getTabId() });
+      showPausedIndicator(true);
+      stopCountdown();
+    }
+  }
+  clearTimeout(activityTimer);
+  activityTimer = setTimeout(() => {
+    userIsActive = false;
+    if (config.refreshMode === "interaction" && config.refreshEnabled) {
+      chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
+      showPausedIndicator(false);
+      startCountdown(config.refreshInterval);
+    }
+  }, IDLE_GRACE);
+}
+
+function showPausedIndicator(paused) {
+  const badge = document.getElementById("__sf_refresh_badge");
+  if (!badge) return;
+  if (paused) {
+    badge.textContent = "Paused";
+    badge.style.background = "#7c2d12";
+    badge.style.color = "#fed7aa";
+  } else {
+    updateRefreshBadge(true);
+  }
+}
+
+function attachActivityListeners() {
+  ["mousedown", "keydown", "scroll", "touchstart"].forEach(evt =>
+    document.addEventListener(evt, onUserActivity, { passive: true })
+  );
+}
+
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
 chrome.runtime.sendMessage({ type: "GET_TAB_ID" }, (res) => {
@@ -614,11 +678,7 @@ chrome.runtime.sendMessage({ type: "GET_TAB_ID" }, (res) => {
 loadConfig(() => {
   setTimeout(() => {
     buildPanel();
-
-    // Count this page load as a refresh (if refresh is active and limit is on)
-    // Small delay so tabId is ready
     setTimeout(() => incrementAndCheckCount(), 200);
-
     applyFilters({ checkNew: false });
     getRows().forEach(row => {
       if (!row.querySelector("th") && row.style.display !== "none") {
@@ -627,7 +687,6 @@ loadConfig(() => {
     });
     startObserver();
     attachActivityListeners();
-
     if (config.refreshEnabled && config.refreshMode !== "manual") {
       chrome.runtime.sendMessage({ type: "START_REFRESH", tabId: getTabId(), intervalSeconds: config.refreshInterval });
       updateRefreshBadge(true);
